@@ -1,7 +1,7 @@
 [
 {
   "directory": "/home/marvin/work/cpp/task2",
-  "command": "/usr/bin/c++ -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_FILESYSTEM_DYN_LINK -DBOOST_FILESYSTEM_NO_LIB -DBOOST_IOSTREAMS_DYN_LINK -DBOOST_IOSTREAMS_NO_LIB -isystem /opt/boost_1.83/include  -o CMakeFiles/program.dir/main.cpp.o -c /home/marvin/work/cpp/task2/main.cpp",
+  "command": "/usr/bin/c++ -DBOOST_ATOMIC_DYN_LINK -DBOOST_ATOMIC_NO_LIB -DBOOST_FILESYSTEM_DYN_LINK -DBOOST_FILESYSTEM_NO_LIB -DBOOST_IOSTREAMS_DYN_LINK -DBOOST_IOSTREAMS_NO_LIB -DBOOST_PROGRAM_OPTIONS_DYN_LINK -DBOOST_PROGRAM_OPTIONS_NO_LIB -isystem /opt/boost_1.83/include  -o CMakeFiles/program.dir/main.cpp.o -c /home/marvin/work/cpp/task2/main.cpp",
   "file": "/home/marvin/work/cpp/task2/main.cpp"
 }
 ]

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/iostreams/device/mapped_file.hpp>
@@ -10,14 +11,18 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <memory>
 
+#include <boost/program_options.hpp>
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
+#include <boost/program_options.hpp>
 
 using boost::uuids::detail::md5;
 namespace bf = boost::filesystem;
+namespace bpo = boost::program_options;
 using mapfile = boost::iostreams::mapped_file_source;
-static constexpr size_t block_size = 10;
+static size_t block_size = 10;
 
 class FileComparator
 {
@@ -25,7 +30,7 @@ public:
     FileComparator(const FileComparator& other) = delete;
     FileComparator& operator=(const FileComparator& other) = delete;
 
-    FileComparator() : path{std::string{"123"}} {}
+    FileComparator() : path{} {}
 
     FileComparator(bf::path name)
         : path(name), file_size(bf::file_size(path)) {}
@@ -45,6 +50,11 @@ public:
 
     bool operator==(const FileComparator& other) const
     {
+        if (file_size != other.file_size)
+        {
+            return false;
+        }
+
         bool result = true;
         reset_comparison();
         other.reset_comparison();
@@ -63,7 +73,12 @@ public:
             other.file.close();
         }
 
-        return result && (file_size == other.file_size);
+        return result;
+    }
+
+    bf::path get_file_name() const
+    {
+        return path;
     }
 
 private:
@@ -103,12 +118,12 @@ private:
 
         auto read_size = std::min(block_size, file_size - offset);
 
-        char data0[block_size] = {0};
-        memcpy(data0, file.data() + offset, read_size);
+        auto data0 = std::unique_ptr<char[]>(new char[block_size]);
+        memcpy(data0.get(), file.data() + offset, read_size);
 
         md5 hash;
         md5::digest_type digest;
-        hash.process_bytes(data0, block_size);
+        hash.process_bytes(data0.get(), block_size);
         hash.get_digest(digest);
 
         offset += block_size;
@@ -129,7 +144,7 @@ class PairsFinder
 using rdit = bf::recursive_directory_iterator;
 
 public:
-    PairsFinder(const bf::path& p) : path(p) {}
+    PairsFinder(const bf::path& p, const std::string& filter) : path(p) {}
 
     void process(std::function<void(bf::path, bf::path)> f)
     {
@@ -164,7 +179,10 @@ public:
         }
     }
 
+private:
     bf::path path;
+    std::string filter;
+    size_t depth;
 };
 
 
@@ -185,20 +203,101 @@ public:
     }
 };
 
-int main()
+class SimilarFileGroups
 {
-    auto pairs_finder = PairsFinder{bf::current_path() / "data"};
-    auto storage = FileComparatorStorage{};
+using SetOfFiles = std::set<bf::path>;
 
-    pairs_finder.process(
-            [&storage](auto left, auto right)
+public:
+    void add_files(const bf::path& file1, const bf::path& file2)
+    {
+        bool found = false;
+        for (auto& fileset : groups) {
+            if ((fileset.find(file1) != fileset.cend())
+                || (fileset.find(file2) != fileset.cend()))
             {
-                const auto& l = storage.get_comparator(left);
-                const auto& r = storage.get_comparator(right);
-                if (l == r) {
-                    std::cout << "EQUAL: " << left << " : " << right << std::endl;
-                }
-            });
+                fileset.emplace(file1);
+                fileset.emplace(file2);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            auto new_set = SetOfFiles{file1};
+            new_set.emplace(file2);
+            groups.emplace_back(new_set);
+        }
+    }
+
+    const std::list<SetOfFiles>& get_groups(void) const
+    {
+        return groups;
+    }
+
+private:
+    std::list<SetOfFiles> groups;
+};
+
+int main(int argc, const char *argv[])
+{
+    std::string dirs{};
+    std::string filter{};
+
+    try {
+        bpo::options_description desc{"Options"};
+        desc.add_options()
+                ("help,h", "This screen")
+                ("dirs,d", bpo::value<std::string>(&dirs)->default_value("./data"), "Directories to search")
+                ("filter,f", bpo::value<std::string>(&filter)->default_value(".*"), "Filter of files. Process only files that pass the filter")
+                ("block_size,bs", bpo::value<size_t>(&block_size)->default_value(10), "Processing blocks size");
+        bpo::variables_map vm;
+        bpo::store(parse_command_line(argc, argv, desc), vm);
+        notify(vm);
+
+        if (vm.count("help")) {
+            std::cout << desc << '\n';
+            return 0;
+        }
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << std::endl;
+        std::cout << "Terminate program" << std::endl;
+        return -1;
+    }
+
+    std::cout << "block_size: " << block_size << std::endl;
+    std::cout << "filter: " << filter << std::endl;
+
+    std::stringstream ss(dirs);
+    std::string dir;
+    while (getline(ss, dir, ' ')) {
+        if (dir.empty())
+            continue;
+        std::cout << "Directory: \'" << dir << "\'" << std::endl;
+
+        auto groups = SimilarFileGroups{};
+        auto pairs_finder = PairsFinder{bf::path(dir), filter};
+        auto storage = FileComparatorStorage{};
+
+        pairs_finder.process(
+                [&storage, &groups](auto left, auto right)
+                {
+                    const auto& l = storage.get_comparator(left);
+                    const auto& r = storage.get_comparator(right);
+                    if (l == r) {
+//                        std::cout << "EQUAL: " << left << " : " << right << std::endl;
+                        groups.add_files(l.get_file_name(), r.get_file_name());
+                    }
+                });
+
+        int i = 0;
+        for (const auto& fileset : groups.get_groups()) {
+            std::for_each(fileset.cbegin(), fileset.cend(), [] (auto file)
+                    {
+                        std::cout << file << std::endl;
+                    });
+            std::cout << std::endl;
+        }
+    }
 
     return 0;
 }
